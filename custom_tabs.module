@@ -1,0 +1,159 @@
+<?php
+function custom_tabs_menu() { 
+
+	ctools_include('cleanstring');
+
+  $items['admin/build/custom-tabs'] = array(
+    'title' => 'Tabs',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('custom_tabs_admin'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+	$enabled_types = variable_get('custom_tabs_types', array());
+	foreach($enabled_types as $type) {
+		if ($type) {
+			unset($anchor,$href);
+			$count = 	variable_get("custom_tabs_tabs_".$type."_count", 1);
+			$i = 1;
+			while($i <= $count) {
+				$anchor = variable_get("custom_tabs_tabs_".$type."_anchor_".$i, null);
+				$href = variable_get("custom_tabs_tabs_".$type."_href_".$i, null);
+				if (trim($anchor) and trim($href)) {
+					$items['node/%/'.strtolower(ctools_cleanstring($anchor))] = array(
+					  'title' => $anchor,
+					  'page callback' => 'custom_tabs_callback',
+					  'page arguments' => array($href,1),
+					  'access callback' => '_custom_tabs_check_type',
+					  'access arguments' => array($href,1,$type),
+					  'type' => MENU_LOCAL_TASK
+					);
+				}
+				$i+=1; 
+			}
+			
+		}
+	}
+	
+	return $items;
+}
+function custom_tabs_callback($href=null,$nid=null) {
+	if (is_numeric($nid)) {
+		$node = node_load($nid);
+	}
+	$href_parsed = _custom_tabs_parse_url($href,$node);
+	drupal_goto($href_parsed['path'],$href_parsed['query'],$href_parsed['fragment']);
+}
+function _custom_tabs_parse_url($href=null,$node=null) {
+	if (!$href) return $href;
+	if (module_exists('token') and $node) {
+		$href = token_replace($href,'node',$node,'<','>');
+	}
+	
+	$href = explode('?',$href);
+	$path = $href[0];
+	$query = $href[1];
+	$fragment = explode('#',$query);
+	$fragment = $fragment[1];
+	
+	return array('path'=>$path,'query'=>$query,'fragment'=>$fragment);
+}
+function _custom_tabs_check_type($href=null,$nid=null,$type=null){
+	if(is_numeric($nid) and $type) {
+		$node = node_load($nid);
+		$href_parsed = _custom_tabs_parse_url($href,$node);
+		$path = $href_parsed['path'];
+		$access = _custom_tabs_path_access_check($path);
+		if(!$access) { return false; }
+		
+		$enabled_types = variable_get('custom_tabs_types', array());
+		if (strtolower(trim($node->type)) === strtolower(trim($enabled_types[$type]))) {
+			return true;
+		}
+	}
+	return false;
+}
+function _custom_tabs_path_access_check($path) {
+	if($path) {
+		$mitem = menu_get_item($path);
+		if ($mitem) {
+			$access = _menu_check_access($mitem,$mitem['map']);
+			if ($mitem['access']) { return true; }
+		}
+	}
+	return false;
+}
+function custom_tabs_admin() {
+	menu_rebuild();
+  $form = array();
+  $types = node_get_types();
+  
+  foreach($types as $id=>$type) {
+  	$name = $type->name;
+  	$options[$id] = $name;
+  }
+ 
+  
+	$form['custom_tabs_types'] = array(
+		'#type'=>'checkboxes',
+		'#title'=>'Enabled Content Types',
+		'#options'=>$options,
+		'#default_value' => variable_get('custom_tabs_types', array())
+	);
+  $form['options'] = array(
+  	'#type' => 'fieldset',
+  	'#title'=>'Options',
+  );
+	$enabled_types = variable_get('custom_tabs_types', array());
+	
+	if (count($enabled_types)) {
+	
+		foreach($enabled_types as $i=>$type) {
+		
+			if ($type) {
+				$fieldset = $type."_tabs";
+				$form[$fieldset] = array(
+					'#type'=>'fieldset',
+					'#title'=>$types[$type]->name." Tabs"
+				);
+				$count = variable_get("custom_tabs_tabs_".$type."_count", 1);
+				$form[$fieldset]["custom_tabs_tabs_".$type."_count"] = array(
+					'#type'=>'textfield',
+					'#title'=> '# of Tabs',
+					'#default_value' => $count
+				);
+				$i=1;
+				while ($i <= $count) {
+					$form[$fieldset]["custom_tabs_tabs_".$type."_anchor_".$i] = array(
+						'#type'=>'textfield',
+						'#title'=> $types[$type]->name.' Tab '.$i.' Anchor',
+						'#default_value' => variable_get("custom_tabs_tabs_".$type."_anchor_".$i, null)
+					);
+					$form[$fieldset]["custom_tabs_tabs_".$type."_href_".$i] = array(
+						'#type'=>'textfield',
+						'#title'=> 'Path',
+						'#default_value' => variable_get("custom_tabs_tabs_".$type."_href_".$i, null)
+					);
+					$i += 1;
+				}
+				if (module_exists('token')) {
+					$form[$fieldset]['token_help'] = array(
+					  '#title' => t('Replacement patterns'),
+					  '#type' => 'fieldset',
+					  '#collapsible' => TRUE,
+					  '#collapsed' => TRUE,
+					  '#description' => t('NOTE: USE < AND > INSTEAD OF [ AND ] !!!!'),
+					 );
+					
+					$form[$fieldset]['token_help']['help'] = array(
+					  '#value' => theme('token_help', 'node','< ',' >'),
+					 );
+				}
+				
+			}
+		}
+	}
+  return system_settings_form($form);
+}
+?>
